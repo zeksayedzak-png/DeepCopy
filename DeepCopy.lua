@@ -1,195 +1,167 @@
 --[[
-    UNIVERSAL OBJECT CLONER - V4 (MOBILE OPTIMIZED)
-    ✅ نسخ جذري للكائنات (100% Replica)
-    ✅ نظام فحص المسارات والأسماء
-    ✅ واجهة متحركة تدعم اللمس
+    MOBILE PART DELETER - V2.5 (DEEP DELETE EDITION)
+    ✅ تحسين الحذف العميق (تأثير على الموبات والفيزياء)
+    ✅ دعم كامل لـ Delta و Mobile
+    ✅ واجهة قابلة للسحب بسلاسة
 ]]--
 
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
-local mouse = player:GetMouse()
+local camera = workspace.CurrentCamera
 
--- متغيرات الحالة
-local scanning = false
-local selectedTarget = nil
-local savedObject = nil
+local autoDeleteActive = false
+local selectionModeActive = false
+local selectedPart = nil
 
--- إنشاء الواجهة
+-- صندوق التحديد (ليظهر لك ماذا ستلحذف)
+local selectionBox = Instance.new("SelectionBox")
+selectionBox.Color3 = Color3.fromRGB(255, 0, 0)
+selectionBox.LineThickness = 0.15
+selectionBox.Parent = game.Workspace
+
+-- ==================== بناء الواجهة (متوافقة مع الهاتف) ====================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "ClonerGui"
+screenGui.Name = "DeepDeleterV2"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 250, 0, 220)
-mainFrame.Position = UDim2.new(0.5, -125, 0.4, 0)
-mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+mainFrame.Size = UDim2.new(0, 200, 0, 280)
+mainFrame.Position = UDim2.new(0.5, -100, 0.4, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 mainFrame.BorderSizePixel = 0
 mainFrame.Active = true
-mainFrame.Draggable = true -- يعمل على معظم المنفذات
+mainFrame.Draggable = true -- تفعيل السحب التلقائي لـ Delta
 mainFrame.Parent = screenGui
 
-local corner = Instance.new("UICorner", mainFrame)
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = mainFrame
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 30)
-title.Text = "📦 مستنسخ الأشياء الاحترافي"
-title.TextColor3 = Color3.fromRGB(255, 255, 0)
+title.Text = "🧱 Deep Deleter V2.5"
+title.Size = UDim2.new(1, 0, 0, 40)
+title.TextColor3 = Color3.fromRGB(0, 255, 150)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
-title.TextSize = 14
+title.TextSize = 16
 title.Parent = mainFrame
 
-local infoLabel = Instance.new("TextLabel")
-infoLabel.Size = UDim2.new(0.9, 0, 0, 40)
-infoLabel.Position = UDim2.new(0.05, 0, 0.15, 0)
-infoLabel.Text = "الحالة: في انتظار التشغيل..."
-infoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-infoLabel.BackgroundTransparency = 1
-infoLabel.TextWrapped = true
-infoLabel.Font = Enum.Font.Gotham
-infoLabel.TextSize = 10
-infoLabel.Parent = mainFrame
-
--- ============ وظيفة الحصول على المسار الكامل ============
-local function getFullPath(obj)
-    local path = obj.Name
-    local parent = obj.Parent
-    while parent and parent ~= game do
-        path = parent.Name .. "." .. path
-        parent = parent.Parent
+-- ==================== وظيفة الحذف العميق (السر هنا) ====================
+local function deepDelete(part)
+    if part and part:IsA("BasePart") then
+        if part.Name == "Baseplate" or part.Name == "Terrain" then return end
+        
+        -- 1. إبطال الفيزياء والتصادم أولاً لضمان سقوط الموبات
+        part.CanCollide = false
+        part.CanTouch = false
+        part.CanQuery = false
+        part.Transparency = 1
+        
+        -- 2. نقل الجزء لمكان سحيق لإجبار السيرفر المحلي على تحديث الموقع
+        part.CFrame = CFrame.new(0, -99999, 0)
+        
+        -- 3. محاولة حذف الجزء نهائياً
+        task.wait(0.05)
+        part:Destroy()
+        
+        -- تنظيف التحديد
+        selectionBox.Adornee = nil
+        selectedPart = nil
     end
-    return "game." .. path
 end
 
--- ============ أزرار التحكم ============
+-- ==================== وظيفة الحصول على الهدف باللمس ====================
+local function getTouchTarget(input)
+    local unitRay = camera:ScreenPointToRay(input.Position.X, input.Position.Y)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {player.Character}
+    
+    local raycastResult = workspace:Raycast(unitRay.Origin, unitRay.Direction * 2000, raycastParams)
+    return raycastResult and raycastResult.Instance
+end
 
--- 1. زر التشغيل/الإيقاف (Scan Toggle)
-local scanBtn = Instance.new("TextButton")
-scanBtn.Size = UDim2.new(0.9, 0, 0, 35)
-scanBtn.Position = UDim2.new(0.05, 0, 0.35, 0)
-scanBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
-scanBtn.Text = "تشغيل وضع الفحص"
-scanBtn.TextColor3 = Color3.new(1,1,1)
-scanBtn.Font = Enum.Font.GothamBold
-scanBtn.Parent = mainFrame
-Instance.new("UICorner", scanBtn)
+-- ==================== الأزرار ====================
 
--- 2. زر التأكيد (Confirm)
-local confirmBtn = Instance.new("TextButton")
-confirmBtn.Size = UDim2.new(0.9, 0, 0, 35)
-confirmBtn.Position = UDim2.new(0.05, 0, 0.55, 0)
-confirmBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
-confirmBtn.Text = "تأكيد النسخ (OK)"
-confirmBtn.TextColor3 = Color3.new(1,1,1)
-confirmBtn.Visible = false
-confirmBtn.Font = Enum.Font.GothamBold
-confirmBtn.Parent = mainFrame
-Instance.new("UICorner", confirmBtn)
+local function createBtn(text, pos, color)
+    local btn = Instance.new("TextButton")
+    btn.Text = text
+    btn.Size = UDim2.new(0.9, 0, 0, 45)
+    btn.Position = pos
+    btn.BackgroundColor3 = color
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 14
+    btn.Parent = mainFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    return btn
+end
 
--- 3. زر الرسبنة (Spawn)
-local spawnBtn = Instance.new("TextButton")
-spawnBtn.Size = UDim2.new(0.9, 0, 0, 35)
-spawnBtn.Position = UDim2.new(0.05, 0, 0.75, 0)
-spawnBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-spawnBtn.Text = "إرساء النسخة (Select)"
-spawnBtn.TextColor3 = Color3.new(1,1,1)
-spawnBtn.Font = Enum.Font.GothamBold
-spawnBtn.Parent = mainFrame
-Instance.new("UICorner", spawnBtn)
+local autoBtn = createBtn("تلقائي (لمس): OFF", UDim2.new(0.05, 0, 0.2, 0), Color3.fromRGB(180, 40, 40))
+local selectModeBtn = createBtn("وضع التحديد: OFF", UDim2.new(0.05, 0, 0.42, 0), Color3.fromRGB(60, 60, 60))
+local deleteBtn = createBtn("🔥 حذف نهائي", UDim2.new(0.05, 0, 0.65, 0), Color3.fromRGB(0, 120, 255))
+deleteBtn.Visible = false
 
--- ============ منطق البرمجة ============
+-- ==================== الأوامر والتحكم ====================
 
--- تفعيل وتعطيل الفحص
-scanBtn.MouseButton1Click:Connect(function()
-    scanning = not scanning
-    if scanning then
-        scanBtn.Text = "إيقاف الفحص"
-        scanBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
-        infoLabel.Text = "المس أي شيء في الماب لاختياره..."
-    else
-        scanBtn.Text = "تشغيل وضع الفحص"
-        scanBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
-    end
+autoBtn.MouseButton1Click:Connect(function()
+    autoDeleteActive = not autoDeleteActive
+    selectionModeActive = false
+    autoBtn.Text = autoDeleteActive and "تلقائي (لمس): ON" or "تلقائي (لمس): OFF"
+    autoBtn.BackgroundColor3 = autoDeleteActive and Color3.fromRGB(40, 180, 40) or Color3.fromRGB(180, 40, 40)
+    selectModeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    deleteBtn.Visible = false
+    selectionBox.Adornee = nil
 end)
 
--- التقاط الشيء عند الضغط
-UserInputService.InputBegan:Connect(function(input)
-    if scanning and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-        local target = mouse.Target
+selectModeBtn.MouseButton1Click:Connect(function()
+    selectionModeActive = not selectionModeActive
+    autoDeleteActive = false
+    selectModeBtn.Text = selectionModeActive and "وضع التحديد: ON" or "وضع التحديد: OFF"
+    selectModeBtn.BackgroundColor3 = selectionModeActive and Color3.fromRGB(0, 150, 255) or Color3.fromRGB(60, 60, 60)
+    autoBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+    autoBtn.Text = "تلقائي (لمس): OFF"
+    deleteBtn.Visible = false
+    selectionBox.Adornee = nil
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local target = getTouchTarget(input)
         if target then
-            -- نحاول أخذ الموديل الكامل إذا كان جزءاً من موديل
-            selectedTarget = target:FindFirstAncestorOfClass("Model") or target
-            infoLabel.Text = "تم اختيار: " .. selectedTarget.Name .. "\nالمسار: " .. getFullPath(selectedTarget)
-            confirmBtn.Visible = true
-        end
-    end
-end)
-
--- تأكيد حفظ الكائن في الذاكرة
-confirmBtn.MouseButton1Click:Connect(function()
-    if selectedTarget then
-        savedObject = selectedTarget
-        infoLabel.Text = "✅ تم حفظ النسخة الأصلية بنجاح: " .. savedObject.Name
-        confirmBtn.Visible = false
-        scanning = false
-        scanBtn.Text = "تشغيل وضع الفحص"
-        scanBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
-    end
-end)
-
--- رسبنة الكائن المنسوخ
-spawnBtn.MouseButton1Click:Connect(function()
-    if savedObject then
-        local char = player.Character
-        if char and char:FindFirstChild("HumanoidRootPart") then
-            -- عمل النسخة الجذرية
-            local success, clone = pcall(function()
-                return savedObject:Clone()
-            end)
-
-            if success and clone then
-                -- التأكد من أن الكائن قابل للرسبنة (Archivable)
-                clone.Parent = workspace
-                
-                -- تحديد الموقع (فوق اللاعب قليلاً)
-                local pos = char.HumanoidRootPart.Position + Vector3.new(0, 5, 0)
-                if clone:IsA("Model") then
-                    clone:MoveTo(pos)
-                elseif clone:IsA("BasePart") then
-                    clone.Position = pos
+            if autoDeleteActive then
+                deepDelete(target)
+            elseif selectionModeActive then
+                if target.Name ~= "Baseplate" then
+                    selectedPart = target
+                    selectionBox.Adornee = target
+                    deleteBtn.Visible = true
                 end
-                
-                print("✅ تم رسبنة نسخة طبق الأصل من " .. savedObject.Name)
-            else
-                infoLabel.Text = "❌ خطأ: هذا الشيء محمي من النسخ المباشر"
             end
         end
-    else
-        infoLabel.Text = "⚠️ اختر شيئاً أولاً ثم اضغط OK"
     end
 end)
 
--- نظام سحب الواجهة للجوال
-local dragging, dragInput, dragStart, startPos
-mainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = mainFrame.Position
+deleteBtn.MouseButton1Click:Connect(function()
+    if selectedPart then
+        deepDelete(selectedPart)
+        deleteBtn.Visible = false
     end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
-        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
+-- زر إغلاق السكريبت
+local closeBtn = Instance.new("TextButton")
+closeBtn.Text = "X"
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -35, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Parent = mainFrame
+Instance.new("UICorner", closeBtn)
+closeBtn.MouseButton1Click:Connect(function() screenGui:Destroy() end)
 
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false
-    end
-end)
+print("✅ Deep Part Deleter V2.5 Loaded! (Physics Optimized)")
